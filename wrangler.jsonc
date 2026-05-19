@@ -1,0 +1,37 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mcp-ga4-gsc",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-03-10",
+  "compatibility_flags": ["nodejs_compat"],
+  "migrations": [
+    {
+      "new_sqlite_classes": ["MyMCP"],
+      "tag": "v1"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "MyMCP",
+        "name": "MCP_OBJECT"
+      }
+    ]
+  },
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "2efa2ad87fad44b6933a7d62076e0f7e"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "dev": {
+    "port": 8788
+  }
+}
