@@ -1,162 +1,170 @@
-# Model Context Protocol (MCP) Server + Google OAuth + Analytics
+# MCP server, Google Analytics 4 + Search Console
 
-This is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction) server that supports remote MCP connections, with Google OAuth built-in and comprehensive analytics tracking.
+A remote Model Context Protocol (MCP) server, deployed on Cloudflare Workers, that exposes read-only Google Analytics 4 and Google Search Console data to MCP clients such as Claude Desktop, Cowork, Lovable Agent, and the MCP Inspector.
 
-You can deploy it to your own Cloudflare account, and after you create your own Google Cloud OAuth client app, you'll have a fully functional remote MCP server with automatic analytics tracking that you can build off. Users will be able to connect to your MCP server by signing in with their Google account, while you get detailed insights into tool usage, performance, and user behavior.
+Built for the Rablab agency to power dashboards and content reporting workflows. Open for forks.
 
-You can use this as a reference example for how to integrate other OAuth providers with an MCP server deployed to Cloudflare, using the [`workers-oauth-provider` library](https://github.com/cloudflare/workers-oauth-provider) and [`mcp-analytics`](https://www.npmjs.com/package/mcp-analytics) for comprehensive tracking.
+## Features
 
-The MCP server (powered by [Cloudflare Workers](https://developers.cloudflare.com/workers/)): 
+- 17 read-only tools across Google Analytics 4 and Search Console
+- OAuth 2.0 user authentication via Google with `analytics.readonly` and `webmasters.readonly` scopes
+- Automatic refresh token, no need to reconnect every hour
+- Works with Dynamic Client Registration (DCR) for compatibility with MCP Inspector, Cowork, Lovable, etc.
+- Multi-user friendly, each user authenticates with their own Google account
+- Deployed once on Cloudflare Workers, available to a whole team
 
-* Acts as OAuth _Server_ to your MCP clients
-* Acts as OAuth _Client_ to your _real_ OAuth server (in this case, Google)
-* Automatically tracks tool usage, performance metrics, and user behavior
+## Available tools
 
-## Analytics Features
+Google Analytics 4 (12 tools, all read-only):
 
-This server includes automatic analytics tracking via the `mcp-analytics` SDK:
+- `ga4_list_account_summaries`, lists all accounts and properties accessible to the user
+- `ga4_list_properties`, lists properties under a specific account
+- `ga4_get_property_details`, returns timezone, currency, industry, etc.
+- `ga4_list_data_streams`, lists web, iOS, Android streams
+- `ga4_get_metadata`, lists all dimensions and metrics available on a property
+- `ga4_check_compatibility`, validates dimension and metric combos
+- `ga4_run_report`, runs a custom report (sessions, conversions, etc. by dimension and date)
+- `ga4_run_realtime_report`, runs a realtime report (last 30 minutes)
+- `ga4_run_pivot_report`, pivot tables
+- `ga4_batch_run_reports`, up to 5 reports in one API call
+- `ga4_list_key_events`, lists key events and conversions
+- `ga4_list_conversion_events`, legacy conversion events
+- `ga4_list_custom_dimensions`, `ga4_list_custom_metrics`
+- `ga4_list_audiences`, `ga4_list_google_ads_links`, `ga4_list_firebase_links`
 
-✅ **Tool execution time** - How long each tool takes to run  
-✅ **Success/failure status** - Which tools succeed or fail  
-✅ **Input parameters** - What data users provide (sensitive data auto-redacted)  
-✅ **Tool results** - Output data from tool executions (automatically sanitized)  
-✅ **Error details** - Full error information when tools fail  
-✅ **User information** - Automatic user identification from OAuth props  
-✅ **Session tracking** - Group tool calls by user session  
-✅ **Server metadata** - Server name and version automatically detected  
+Google Search Console (5 tools, all read-only):
 
-## Getting Started
+- `gsc_list_sites`, lists all GSC properties accessible to the user
+- `gsc_query_search_analytics`, clicks, impressions, CTR, position by dimensions and date
+- `gsc_list_sitemaps`, lists sitemaps submitted
+- `gsc_get_sitemap`, details of a specific sitemap
+- `gsc_inspect_url`, URL inspection (indexation status, last crawl, mobile usability)
 
-Clone the repo & install dependencies: `npm install`
+No write actions are exposed. Worst case if credentials leak, the attacker can only read GA4 and GSC data they already have access to.
 
-### For Production
-Create a new [Google Cloud OAuth App](https://cloud.google.com/iam/docs/workforce-manage-oauth-app): 
-- For the Homepage URL, specify `https://mcp-google-oauth.<your-subdomain>.workers.dev`
-- For the Authorization callback URL, specify `https://mcp-google-oauth.<your-subdomain>.workers.dev/callback`
-- Note your Client ID and generate a Client secret. 
-- Set secrets via Wrangler
+## Architecture
+
+```
+MCP client (Claude, Cowork, Lovable, Inspector)
+        │
+        │ MCP over SSE
+        ▼
+Cloudflare Worker (this repo)
+    ├── @cloudflare/workers-oauth-provider
+    │   handles MCP OAuth + Dynamic Client Registration
+    ├── google-handler.ts
+    │   handles Google OAuth flow + refresh token
+    └── 17 MCP tools
+            │
+            ▼
+    Google APIs (analyticsdata, analyticsadmin, searchconsole, webmasters)
+```
+
+## Setup for your own deployment
+
+If you fork this repo to deploy your own MCP server.
+
+### 1. Google Cloud setup
+
+In your Google Cloud project:
+
+1. Enable the following APIs:
+   - Google Analytics Admin API
+   - Google Analytics Data API
+   - Google Search Console API
+2. Configure the OAuth Consent Screen (Audience: External, mode Test, add yourself as a test user).
+3. Create an OAuth 2.0 Client ID, type Web Application:
+   - Authorized JavaScript origin: `https://<your-worker-name>.<your-subdomain>.workers.dev`
+   - Authorized redirect URI: `https://<your-worker-name>.<your-subdomain>.workers.dev/callback`
+4. Note the Client ID. Click `Add secret`, copy the Client Secret value (shown only once).
+
+### 2. Cloudflare setup
+
+1. Create a KV namespace, name it `OAUTH_KV`. Note its ID.
+2. Edit `wrangler.jsonc`:
+   - `name`: your worker name (this controls the URL)
+   - `kv_namespaces[0].id`: replace with your KV namespace ID
+
+### 3. Deploy
+
 ```bash
-wrangler secret put GOOGLE_CLIENT_ID
-wrangler secret put GOOGLE_CLIENT_SECRET
-wrangler secret put COOKIE_ENCRYPTION_KEY # add any random string here e.g. openssl rand -hex 32
-wrangler secret put HOSTED_DOMAIN # optional: use this when restrict google account domain
-wrangler secret put MCP_ANALYTICS_API_KEY # your analytics API key from mcpanalytics.dev
+npm install --legacy-peer-deps
+
+# Set the secrets (you'll be prompted to paste each value)
+npx wrangler secret put GOOGLE_CLIENT_ID
+npx wrangler secret put GOOGLE_CLIENT_SECRET
+npx wrangler secret put COOKIE_ENCRYPTION_KEY  # any random 32-char hex string, e.g. openssl rand -hex 32
+npx wrangler secret put HOSTED_DOMAIN           # press Enter for empty (accept any Google account)
+
+# Deploy
+npx wrangler deploy
 ```
 
-#### Set up a KV namespace
-- Create the KV namespace: 
-`wrangler kv:namespace create "OAUTH_KV"`
-- Update the Wrangler file with the KV ID
+### 4. Test with MCP Inspector
 
-#### Deploy & Test
-Deploy the MCP server to make it available on your workers.dev domain 
-` wrangler deploy`
-
-Test the remote server using [MCP Playground](https://mcpsplayground.com): 
-
-1. Visit [mcpsplayground.com](https://mcpsplayground.com)
-2. Enter your server URL: `https://mcp-google-oauth.<your-subdomain>.workers.dev/sse`
-3. Click "Connect" and complete the Google OAuth authentication flow
-4. Once authenticated, you'll see your tools available in the playground interface
-5. Test the "add" tool by providing two numbers and see the results with automatic analytics tracking
-
-Alternatively, you can also test using the traditional [Inspector](https://modelcontextprotocol.io/docs/tools/inspector):
-
-```
+```bash
 npx @modelcontextprotocol/inspector@latest
 ```
 
-<img width="640" alt="image" src="https://github.com/user-attachments/assets/7973f392-0a9d-4712-b679-6dd23f824287" />
+Open `http://localhost:6274`. Set Transport Type to `SSE`, URL to `https://<your-worker>.workers.dev/sse`, click Connect. A Google OAuth flow opens, approve the scopes. Then try `gsc_list_sites` to confirm it works.
 
-You now have a remote MCP server deployed with comprehensive analytics! 
+### 5. Connect to Claude Desktop
 
-### Access Control
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
-This MCP server uses Google Cloud OAuth for authentication. All authenticated Google users can access basic tools like "add". When you restrict users with hosted domain, set `HOSTED_DOMAIN` env.
-
-### Access the remote MCP server from Claude Desktop
-
-Open Claude Desktop and navigate to Settings -> Developer -> Edit Config. This opens the configuration file that controls which MCP servers Claude can access.
-
-Replace the content with the following configuration. Once you restart Claude Desktop, a browser window will open showing your OAuth login page. Complete the authentication flow to grant Claude access to your MCP server. After you grant access, the tools will become available for you to use. 
-
-```
+```json
 {
   "mcpServers": {
-    "math": {
+    "ga4-gsc": {
       "command": "npx",
-      "args": [
-        "mcp-remote",
-        "https://mcp-google-oauth.<your-subdomain>.workers.dev/sse"
-      ]
+      "args": ["-y", "mcp-remote", "https://<your-worker>.workers.dev/sse"]
     }
   }
 }
 ```
 
-Once the Tools (under 🔨) show up in the interface, you can ask Claude to use them. For example: "Could you use the math tool to add 23 and 19?". Claude should invoke the tool and show the result generated by the MCP server, with all interactions automatically tracked in your analytics dashboard.
+Restart Claude Desktop. The first time you call a tool, an OAuth flow opens in your browser.
 
-### For Local Development
-If you'd like to iterate and test your MCP server, you can do so in local development. This will require you to create another OAuth App on Google Cloud: 
-- For the Homepage URL, specify `http://localhost:8788`
-- For the Authorization callback URL, specify `http://localhost:8788/callback`
-- Note your Client ID and generate a Client secret. 
-- Create a `.dev.vars` file in your project root with: 
+### 6. Connect at organization level (recommended)
+
+If you have an Anthropic organization (Claude Team or Enterprise), add the worker URL as a custom connector at the organization level. Every team member gets access in Cowork, Claude Desktop, and claude.ai web without local config.
+
+## Local development
+
+```bash
+npm install --legacy-peer-deps
+cp .dev.vars.example .dev.vars
+# Fill in the values in .dev.vars (do not commit this file)
+npx wrangler dev
 ```
-GOOGLE_CLIENT_ID=your_development_google_cloud_oauth_client_id
-GOOGLE_CLIENT_SECRET=your_development_google_cloud_oauth_client_secret
-MCP_ANALYTICS_API_KEY=your_analytics_api_key
-```
 
-#### Develop & Test
-Run the server locally to make it available at `http://localhost:8788`
-`wrangler dev`
+## CI/CD with Cloudflare Workers Builds
 
-To test the local server, enter `http://localhost:8788/sse` into Inspector and hit connect. Once you follow the prompts, you'll be able to "List Tools" with analytics tracking enabled.
+This repo is set up to auto-deploy on push to `main` via Cloudflare Workers Builds. Connect this GitHub repository in your Cloudflare Workers dashboard:
 
-#### Using Claude and other MCP Clients
+- Build command: `npm install --legacy-peer-deps`
+- Deploy command: `npx wrangler deploy`
+- Production branch: `main`
 
-When using Claude to connect to your remote MCP server, you may see some error messages. This is because Claude Desktop doesn't yet support remote MCP servers, so it sometimes gets confused. To verify whether the MCP server is connected, hover over the 🔨 icon in the bottom right corner of Claude's interface. You should see your tools available there.
+Each commit on `main` rebuilds and redeploys the worker. Other branches build preview workers at distinct URLs.
 
-#### Using Cursor and other MCP Clients
+## Security notes
 
-To connect Cursor with your MCP server, choose `Type`: "Command" and in the `Command` field, combine the command and args fields into one (e.g. `npx mcp-remote https://<your-worker-name>.<your-subdomain>.workers.dev/sse`).
+- All Google API calls are read-only. No write scope is requested.
+- Tokens (access and refresh) are stored encrypted in the OAuth provider's KV store and as Durable Object props, never logged.
+- The `.dev.vars` file (containing local secrets for development) is gitignored.
+- Each user authenticates with their own Google account, so the worker only has access to the GA4 and GSC properties that user already has access to. No service account, no shared credentials.
+- Set the OAuth Consent Screen to Test mode and only add trusted test users until you complete Google verification (only required for >100 users).
 
-Note that while Cursor supports HTTP+SSE servers, it doesn't support authentication, so you still need to use `mcp-remote` (and to use a STDIO server, not an HTTP one).
+## Credits
 
-You can connect your MCP server to other MCP clients like Windsurf by opening the client's configuration file, adding the same JSON that was used for the Claude setup, and restarting the MCP client.
+This project is forked from and inspired by [bighadj22/cloudflare-mcp-google-oauth-analytics](https://github.com/bighadj22/cloudflare-mcp-google-oauth-analytics), which provided the original Cloudflare Workers + Google OAuth + MCP boilerplate. The Rablab fork:
 
-## How does it work? 
+- Replaces the dummy `add` tool with 17 production-ready Google Analytics 4 and Search Console read-only tools
+- Migrates from the deprecated `mcp-analytics` package to the native `agents/mcp` SDK from Cloudflare
+- Adds `access_type=offline` + automatic refresh token handling so users don't reconnect every hour
+- Fixes Google OAuth token exchange request body to use snake_case as required by Google
 
-#### OAuth Provider
-The OAuth Provider library serves as a complete OAuth 2.1 server implementation for Cloudflare Workers. It handles the complexities of the OAuth flow, including token issuance, validation, and management. In this project, it plays the dual role of:
+## License
 
-- Authenticating MCP clients that connect to your server
-- Managing the connection to Google Cloud's OAuth services
-- Securely storing tokens and authentication state in KV storage
-
-#### Durable MCP with Analytics
-Durable MCP extends the base MCP functionality with Cloudflare's Durable Objects and analytics tracking, providing:
-- Persistent state management for your MCP server
-- Secure storage of authentication context between requests
-- Access to authenticated user information via `this.props`
-- Support for conditional tool availability based on user identity
-- Automatic analytics tracking of all tool usage with user context
-- Performance metrics and error monitoring
-- Comprehensive insights into user behavior and tool effectiveness
-
-#### MCP Remote
-The MCP Remote library enables your server to expose tools that can be invoked by MCP clients like the Inspector. It:
-- Defines the protocol for communication between clients and your server
-- Provides a structured way to define tools
-- Handles serialization and deserialization of requests and responses
-- Maintains the Server-Sent Events (SSE) connection between clients and your server
-
-## Analytics Dashboard
-
-Visit [mcpanalytics.dev](https://mcpanalytics.dev) to view your analytics dashboard and gain insights into:
-- Tool usage patterns and popularity
-- User engagement and session analytics
-- Performance metrics and bottlenecks
-- Error rates and failure analysis
-- Success/failure trends over time
+MIT, see [LICENSE](LICENSE).
