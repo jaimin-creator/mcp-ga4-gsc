@@ -6,5 +6,7 @@ interface Env {
   GOOGLE_CLIENT_SECRET: string;
   COOKIE_ENCRYPTION_KEY: string;
   HOSTED_DOMAIN: string;
+  ALLOWED_EMAILS?: string;
+  ALLOWED_DOMAINS?: string;
   MCP_OBJECT: DurableObjectNamespace<import("./src/index").MyMCP>;
 }

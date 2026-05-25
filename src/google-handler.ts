@@ -9,6 +9,77 @@ import {
 
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>();
 
+/* -------------------------------------------------------------------------- */
+/* Allowlist helpers (Rablab fork)                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Returns true if the email matches at least one entry of ALLOWED_EMAILS or
+ * ALLOWED_DOMAINS. Both lists are comma-separated and case-insensitive.
+ *
+ * If neither secret is set, no one is allowed. This is on purpose: a public
+ * worker with no allowlist would let any Google account burn the deployment.
+ */
+function isEmailAllowed(email: string, env: Env): boolean {
+	const normalized = email.trim().toLowerCase();
+
+	const allowedEmails = (env.ALLOWED_EMAILS || "")
+		.split(",")
+		.map((e) => e.trim().toLowerCase())
+		.filter(Boolean);
+
+	if (allowedEmails.includes(normalized)) return true;
+
+	const allowedDomains = (env.ALLOWED_DOMAINS || "")
+		.split(",")
+		.map((d) => d.trim().toLowerCase().replace(/^@/, ""))
+		.filter(Boolean);
+
+	return allowedDomains.some((d) => normalized.endsWith(`@${d}`));
+}
+
+function escapeHtml(s: string): string {
+	return s
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#39;");
+}
+
+function renderDeniedPage(email: string): string {
+	return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Acces refuse</title>
+  <style>
+    body{font-family:system-ui,-apple-system,sans-serif;background:#f5f5f5;
+      color:#26372b;display:flex;align-items:center;justify-content:center;
+      min-height:100vh;margin:0;padding:1rem}
+    .card{background:#fff;padding:2rem 2.5rem;border-radius:12px;
+      box-shadow:0 4px 24px rgba(0,0,0,.08);max-width:480px;text-align:center}
+    h1{color:#ec662a;margin:0 0 1rem;font-size:1.5rem}
+    p{line-height:1.6;color:#26372b}
+    code{background:#f5f5f5;padding:.15rem .4rem;border-radius:4px;
+      font-size:.9em;color:#26372b}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Acces refuse</h1>
+    <p>Le compte <code>${escapeHtml(email)}</code> n'est pas autorise a utiliser ce serveur MCP.</p>
+    <p>Contacte l'administrateur de Rablab si tu penses que c'est une erreur.</p>
+  </div>
+</body>
+</html>`;
+}
+
+/* -------------------------------------------------------------------------- */
+/* OAuth flow                                                                 */
+/* -------------------------------------------------------------------------- */
+
 app.get("/authorize", async (c) => {
 	const oauthReqInfo = await c.env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
 	const { clientId } = oauthReqInfo;
@@ -25,7 +96,8 @@ app.get("/authorize", async (c) => {
 	return renderApprovalDialog(c.req.raw, {
 		client: await c.env.OAUTH_PROVIDER.lookupClient(clientId),
 		server: {
-			description: "Rablab MCP server for Google Analytics 4 and Search Console. Requires read-only access to the GA4 and GSC properties of your account.",
+			description:
+				"Rablab MCP server for Google Analytics 4 and Search Console. Requires read-only access to the GA4 and GSC properties of your account.",
 			name: "Rablab GA4 + Search Console MCP",
 		},
 		state: { oauthReqInfo },
@@ -53,7 +125,8 @@ async function redirectToGoogle(
 				clientId: c.env.GOOGLE_CLIENT_ID,
 				hostedDomain: c.env.HOSTED_DOMAIN,
 				redirectUri: new URL("/callback", c.req.raw.url).href,
-				scope: "openid email profile https://www.googleapis.com/auth/analytics.readonly https://www.googleapis.com/auth/webmasters.readonly",
+				scope:
+					"openid email profile https://www.googleapis.com/auth/analytics.readonly https://www.googleapis.com/auth/webmasters.readonly",
 				state: btoa(JSON.stringify(oauthReqInfo)),
 				upstreamUrl: "https://accounts.google.com/o/oauth2/v2/auth",
 			}),
@@ -65,13 +138,14 @@ async function redirectToGoogle(
 /**
  * OAuth Callback Endpoint
  *
- * This route handles the callback from Google after user authentication.
- * It exchanges the temporary code for an access token, then stores some
- * user metadata & the auth token as part of the 'props' on the token passed
- * down to the client. It ends by redirecting the client back to _its_ callback URL
+ * Google redirects here after user authentication.
+ * 1. Exchange the temporary code for tokens.
+ * 2. Fetch the user's email from Google.
+ * 3. Check the email against ALLOWED_EMAILS / ALLOWED_DOMAINS (Rablab fork).
+ * 4. If allowed, complete the MCP OAuth flow back to the MCP client.
  */
 app.get("/callback", async (c) => {
-	// Get the oathReqInfo out of KV
+	// Get the oauthReqInfo out of state
 	const oauthReqInfo = JSON.parse(atob(c.req.query("state") as string)) as AuthRequest;
 	if (!oauthReqInfo.clientId) {
 		return c.text("Invalid state", 400);
@@ -107,11 +181,21 @@ app.get("/callback", async (c) => {
 		return c.text(`Failed to fetch user info: ${await userResponse.text()}`, 500);
 	}
 
-	const { id, name, email } = (await userResponse.json()) as {
+	const { id, name, email, verified_email } = (await userResponse.json()) as {
 		id: string;
 		name: string;
 		email: string;
+		verified_email?: boolean;
 	};
+
+	/* ----- Rablab fork: allowlist gate ------------------------------------ */
+	if (verified_email === false) {
+		return c.html(renderDeniedPage(email + " (non verifie)"), 403);
+	}
+	if (!isEmailAllowed(email, c.env)) {
+		return c.html(renderDeniedPage(email), 403);
+	}
+	/* ---------------------------------------------------------------------- */
 
 	// Return back to the MCP client a new token, storing the Google tokens in props
 	const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
