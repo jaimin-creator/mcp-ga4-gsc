@@ -141,6 +141,36 @@ Quelqu'un fork le repo pour son propre projet. Il fait :
 
 Aucun code MCP à modifier. Le multi-compte est désactivé par défaut (`ALIAS_PATHS = []`).
 
+## Restreindre les chemins par utilisateur (optionnel)
+
+Par défaut, n'importe quel email présent dans `ALLOWED_EMAILS` peut se connecter à n'importe quel chemin (`/sse`, `/sse-secondary`, etc.). Si tu veux qu'un chemin donné soit réservé à un email précis (par exemple pour éviter les mélanges accidentels dans une équipe, ou pour isoler un chemin de test), configure la variable `PATH_EMAIL_MAP`.
+
+**Format** : JSON string, chaque clé est un chemin de base et la valeur est la liste des emails autorisés sur ce chemin.
+
+**Setup dans le dashboard Cloudflare** (Settings -> Variables and Secrets -> Add -> Plaintext) :
+
+- Name : `PATH_EMAIL_MAP`
+- Value (exemple) : `{"/sse":["alice@example.com"],"/sse-secondary":["bob@example.com"],"/sse-test":["alice-test@example.com"]}`
+
+**Comportement** :
+
+- Si `PATH_EMAIL_MAP` n'est pas définie ou vide → aucun filtrage par chemin (comportement par défaut)
+- Si un chemin est dans la map mais qu'un email non listé tente de l'utiliser → erreur 403
+- Si un chemin n'est PAS dans la map → aucune restriction sur ce chemin (les emails de `ALLOWED_EMAILS` y ont accès)
+
+**Quand l'utiliser** :
+
+- Équipe nombreuse, risque de mélange d'accès clients
+- Chemin de test isolé (que toi seul doit pouvoir utiliser)
+- Audit / conformité (qui peut accéder à quoi)
+
+**Quand ne PAS l'utiliser** :
+
+- Petit setup où la discipline suffit
+- Tu veux maximiser la flexibilité de connexion
+
+Modifier `PATH_EMAIL_MAP` ne nécessite pas de redeploy : c'est lu au runtime à chaque requête. Édite la valeur dans le dashboard, Save and deploy (config-only deploy en quelques secondes), c'est en place.
+
 ## Comprendre le routing
 
 Le `OAuthProvider` route les requêtes entrantes selon ce mécanisme :

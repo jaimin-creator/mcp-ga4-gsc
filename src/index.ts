@@ -460,12 +460,80 @@ function parseAliasPaths(envValue: string | undefined): string[] {
 		.filter(Boolean);
 }
 
+/**
+ * Parse the PATH_EMAIL_MAP env var, a JSON string of the form
+ *   {"/sse": ["a@x.com"], "/sse-secondary": ["b@x.com"]}
+ * Each path lists the emails authorized to connect to that path. If the var
+ * is unset, empty, or malformed, returns an empty object and no path
+ * restriction is applied.
+ */
+function parsePathEmailMap(envValue: string | undefined): Record<string, string[]> {
+	if (!envValue) return {};
+	try {
+		const parsed = JSON.parse(envValue);
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+		const out: Record<string, string[]> = {};
+		for (const [path, emails] of Object.entries(parsed)) {
+			if (Array.isArray(emails)) {
+				out[path] = emails.filter((e): e is string => typeof e === "string");
+			}
+		}
+		return out;
+	} catch {
+		return {};
+	}
+}
+
+/**
+ * Check whether an email is authorized to use a given request path.
+ * Returns true if no PATH_EMAIL_MAP entry covers this path (no restriction).
+ * Returns false if the path is restricted and the email is not in the list.
+ * Matches longest path prefix first to handle overlapping prefixes like
+ * /sse and /sse-secondary correctly.
+ */
+function isAllowedForPath(
+	requestPath: string,
+	email: string | undefined,
+	map: Record<string, string[]>,
+): boolean {
+	const sortedPaths = Object.keys(map).sort((a, b) => b.length - a.length);
+	const matchedPath = sortedPaths.find(
+		(p) => requestPath === p || requestPath.startsWith(`${p}/`),
+	);
+	if (!matchedPath) return true;
+	const allowedEmails = map[matchedPath];
+	if (!Array.isArray(allowedEmails) || allowedEmails.length === 0) return true;
+	const normalized = email?.trim().toLowerCase();
+	if (!normalized) return false;
+	return allowedEmails.some((e) => e.trim().toLowerCase() === normalized);
+}
+
 const mcpHandler = MyMCP.mount("/sse") as any;
 
 const apiHandler = {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext) {
-		const aliasPaths = parseAliasPaths(env.ALIAS_PATHS);
 		const url = new URL(request.url);
+
+		// Path-based access control (optional, configured via PATH_EMAIL_MAP)
+		const pathEmailMap = parsePathEmailMap(env.PATH_EMAIL_MAP);
+		if (Object.keys(pathEmailMap).length > 0) {
+			const userEmail = (ctx as unknown as { props?: { email?: string } }).props?.email;
+			if (!isAllowedForPath(url.pathname, userEmail, pathEmailMap)) {
+				return new Response(
+					JSON.stringify({
+						error: "forbidden",
+						message: "This account is not authorized for this path. Use the connector URL assigned to your account.",
+					}),
+					{
+						status: 403,
+						headers: { "Content-Type": "application/json" },
+					},
+				);
+			}
+		}
+
+		// Alias path rewrite (multi-account support)
+		const aliasPaths = parseAliasPaths(env.ALIAS_PATHS);
 		for (const alias of aliasPaths) {
 			if (url.pathname === alias || url.pathname.startsWith(`${alias}/`)) {
 				const rewrittenUrl = new URL(request.url);

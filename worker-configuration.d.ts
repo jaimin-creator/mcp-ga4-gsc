@@ -9,5 +9,6 @@ interface Env {
   ALLOWED_EMAILS?: string;
   ALLOWED_DOMAINS?: string;
   ALIAS_PATHS?: string;
+  PATH_EMAIL_MAP?: string;
   MCP_OBJECT: DurableObjectNamespace<import("./src/index").MyMCP>;
 }
