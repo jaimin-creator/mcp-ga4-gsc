@@ -437,14 +437,37 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
  * worker to be connected twice (once per Google account, e.g. ppc.rablab@gmail.com
  * and plateformes@rablab.ca), we expose the same MCP on two distinct paths.
  *
- * Each path triggers its own OAuth flow and stores its own tokens.
- * Add a new entry here if you need a third connected account.
+ * Each path triggers its own OAuth flow on the Claude side (separate MCP
+ * tokens, separate Google refresh tokens) but routes internally to the same
+ * /sse handler. We cannot call MyMCP.mount() twice on different paths because
+ * agents@0.0.95 hardcodes "/sse" in the internal upgrade URL and the DO id
+ * namespace prefix, so multi-mount would collide. The wrapper below rewrites
+ * the request path to /sse before forwarding to the real handler.
+ *
+ * Add a new alias path here if you need a third connected account.
  */
-export default new OAuthProvider({
-	apiHandlers: {
-		"/sse": MyMCP.mount("/sse") as any,
-		"/sse-plateformes": MyMCP.mount("/sse-plateformes") as any,
+const ALIAS_PATHS = ["/sse-plateformes"];
+
+const mcpHandler = MyMCP.mount("/sse") as any;
+
+const apiHandler = {
+	async fetch(request: Request, env: any, ctx: ExecutionContext) {
+		const url = new URL(request.url);
+		for (const alias of ALIAS_PATHS) {
+			if (url.pathname === alias || url.pathname.startsWith(`${alias}/`)) {
+				const rewrittenUrl = new URL(request.url);
+				rewrittenUrl.pathname = url.pathname.replace(alias, "/sse");
+				const rewrittenRequest = new Request(rewrittenUrl, request);
+				return mcpHandler.fetch(rewrittenRequest, env, ctx);
+			}
+		}
+		return mcpHandler.fetch(request, env, ctx);
 	},
+};
+
+export default new OAuthProvider({
+	apiHandler: apiHandler as any,
+	apiRoute: ["/sse", ...ALIAS_PATHS],
 	authorizeEndpoint: "/authorize",
 	clientRegistrationEndpoint: "/register",
 	defaultHandler: GoogleHandler as any,
