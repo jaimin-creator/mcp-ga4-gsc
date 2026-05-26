@@ -155,7 +155,11 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 Restart Claude Desktop. The first time you call a tool, an OAuth flow opens in your browser.
 
-**Multiple Google accounts on the same machine.** Claude Desktop deduplicates MCP servers by URL, so you cannot add the same `/sse` endpoint twice. The worker supports multi-account via the `ALIAS_PATHS` array in `src/index.ts`: each alias is a separate URL that Claude treats as a distinct connector (e.g. `/sse-secondary`). By default `ALIAS_PATHS = []` so the worker behaves like a normal single-account MCP. See [`MULTI-ACCOUNT.md`](./MULTI-ACCOUNT.md) for step-by-step scenarios (add, remove, fork, troubleshoot).
+**Multiple Google accounts on the same machine.** Claude Desktop deduplicates MCP servers by URL, so you cannot add the same `/sse` endpoint twice. The worker supports multi-account via the `ALIAS_PATHS` env variable: each alias is a separate URL that Claude treats as a distinct connector (e.g. `/sse-secondary`). By default `ALIAS_PATHS` is unset so the worker behaves like a normal single-account MCP.
+
+**Path-based access control (optional).** You can also restrict each path to specific authorized emails via the `PATH_EMAIL_MAP` env variable, a JSON map of `path -> [authorized emails]`. Useful when you want an alias path usable by one specific user only (e.g. a test path isolated from team usage, or strict separation between account holders in a transition setup). If `PATH_EMAIL_MAP` is unset, no path-level restriction applies and any email in `ALLOWED_EMAILS` can use any path.
+
+See [`MULTI-ACCOUNT.md`](./MULTI-ACCOUNT.md) for step-by-step scenarios (add a route, remove a route, fork the repo, restrict paths to specific users, troubleshoot).
 
 ### 7. Connect at organization level (recommended)
 
