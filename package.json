@@ -10,7 +10,6 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@cloudflare/workerd-darwin-arm64": "^1.20260526.1",
     "@cloudflare/workers-oauth-provider": "^0.0.5",
     "@modelcontextprotocol/sdk": "^1.12.3",
     "agents": "^0.0.95",

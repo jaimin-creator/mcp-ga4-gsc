@@ -190,10 +190,16 @@ npx wrangler tail <nom-du-worker> --format pretty
 
 Rafraîchir les outils dans Claude Desktop. Si le SSE handshake n'aboutit pas, c'est souvent un problème de rewrite (chemin alias mal écrit dans `ALIAS_PATHS`).
 
-### Refus de déploiement Wrangler avec « workerd-darwin-arm64 missing »
+### Refus de déploiement Wrangler avec « workerd-* missing »
+
+Le binaire natif de Workerd correspondant à ta plateforme (macOS arm64, Linux x64, etc.) n'a pas été installé. Cela arrive quand npm a sauté les `optionalDependencies` lors d'une install passée.
+
+Solution propre : régénérer les `node_modules` en forçant les optional deps.
 
 ```bash
-npm install @cloudflare/workerd-darwin-arm64 --legacy-peer-deps
+rm -rf node_modules
+npm install --include=optional --legacy-peer-deps
+npx wrangler deploy
 ```
 
-Puis relancer `npx wrangler deploy`.
+Ne PAS installer le binaire directement en `dependencies` (par exemple `npm install @cloudflare/workerd-darwin-arm64`), car cela casse le build sur les autres plateformes (le runner Cloudflare est Linux x64 et refuserait un binaire Darwin).

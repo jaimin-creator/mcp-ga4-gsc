@@ -154,12 +154,17 @@ In short : set `ALIAS_PATHS=/sse-secondary` as a secret, redeploy, and add a sec
 
 ## 8. Troubleshooting
 
-### `wrangler deploy` fails with `workerd-darwin-arm64 missing`
+### `wrangler deploy` fails with `workerd-* missing`
+
+The platform-specific Workerd binary (macOS arm64, Linux x64, etc.) was not installed because npm skipped `optionalDependencies` on a previous install. Force a clean install :
 
 ```bash
-npm install @cloudflare/workerd-darwin-arm64 --legacy-peer-deps
+rm -rf node_modules
+npm install --include=optional --legacy-peer-deps
 npx wrangler deploy
 ```
+
+Do NOT install the binary directly as a `dependency` (e.g. `npm install @cloudflare/workerd-darwin-arm64`) because it would break the build on other platforms (Cloudflare's build runner is Linux x64).
 
 ### Google OAuth returns 403 access_denied
 
