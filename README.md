@@ -155,6 +155,8 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 Restart Claude Desktop. The first time you call a tool, an OAuth flow opens in your browser.
 
+**Multiple Google accounts on the same machine.** Claude Desktop deduplicates MCP servers by URL, so you cannot add the same `/sse` endpoint twice. The worker exposes additional SSE routes (e.g. `/sse-plateformes`) so you can connect a second Google account in parallel. Add new routes in `src/index.ts` (inside `apiHandlers`) and add the new email to `ALLOWED_EMAILS`. See `DEPLOY.md` for the Rablab-specific runbook.
+
 ### 7. Connect at organization level (recommended)
 
 If you have an Anthropic organization (Claude Team or Enterprise), add the worker URL as a custom connector at the organization level. Every team member gets access in Cowork, Claude Desktop, and claude.ai web without local config. The allowlist enforces who can actually authenticate.

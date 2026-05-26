@@ -9,7 +9,7 @@
   "compatibility_date": "2025-03-10",
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
-    "ALLOWED_EMAILS": "ppc.rablab@gmail.com",
+    "ALLOWED_EMAILS": "ppc.rablab@gmail.com,plateformes@rablab.ca",
     "ALLOWED_DOMAINS": ""
   },
   "migrations": [

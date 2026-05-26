@@ -90,24 +90,52 @@ Ouvrir http://localhost:5173. Connecter à `https://mcp-ga4-gsc.rablab.workers.d
 
 ### 5, Connecter dans Claude Desktop / Cowork
 
+Le worker expose **deux routes SSE identiques** pour permettre de connecter deux comptes Google distincts (Claude Desktop déduplique par URL, donc une seule route ne suffirait pas) :
+
+- `https://mcp-ga4-gsc.rablab.workers.dev/sse` (route historique, compte `ppc.rablab@gmail.com`)
+- `https://mcp-ga4-gsc.rablab.workers.dev/sse-plateformes` (compte `plateformes@rablab.ca`)
+
 Dans `~/Library/Application Support/Claude/claude_desktop_config.json` (ou via l'UI Claude Desktop) :
 
 ```json
 {
   "mcpServers": {
-    "ga4-gsc-rablab": {
+    "ga4-gsc-rablab-ppc": {
       "command": "npx",
       "args": ["mcp-remote", "https://mcp-ga4-gsc.rablab.workers.dev/sse"]
+    },
+    "ga4-gsc-rablab-plateformes": {
+      "command": "npx",
+      "args": ["mcp-remote", "https://mcp-ga4-gsc.rablab.workers.dev/sse-plateformes"]
     }
   }
 }
 ```
 
-Restart Claude Desktop. Le worker apparaît dans la liste des MCPs. Premier appel = OAuth flow.
+Restart Claude Desktop. Les deux serveurs apparaissent dans la liste des MCPs. Premier appel sur chaque serveur = OAuth flow (te connecter avec le bon compte Google à chaque fois).
+
+Si tu veux ajouter un 3e compte, voir la section « Ajouter un nouveau compte » plus bas.
 
 ## Diffusion à Rablab
 
-Pour que tous les membres Rablab utilisent le worker, partager l'URL `https://mcp-ga4-gsc.rablab.workers.dev/sse` et leur faire ajouter la config Claude Desktop ci-dessus. Chaque utilisateur fait son OAuth flow avec son propre compte Google (donc accès uniquement aux propriétés GA4 et GSC où il a déjà les droits).
+Pour que tous les membres Rablab utilisent le worker, partager l'une des URLs ci-dessus et leur faire ajouter la config Claude Desktop. Chaque utilisateur fait son OAuth flow avec son propre compte Google (donc accès uniquement aux propriétés GA4 et GSC où il a déjà les droits).
+
+**Important** : l'email du compte qui s'authentifie doit être présent dans `ALLOWED_EMAILS` (var Cloudflare) sinon le callback OAuth retourne « Accès refusé ».
+
+## Ajouter un nouveau compte (3e, 4e, etc.)
+
+Trois étapes :
+
+1. Ajouter l'email dans `ALLOWED_EMAILS` (wrangler.jsonc ou via dashboard Cloudflare Workers, section Variables) en séparant par virgules.
+2. Dans `src/index.ts`, ajouter une ligne dans `apiHandlers` avec un nouveau path unique :
+   ```ts
+   apiHandlers: {
+     "/sse": MyMCP.mount("/sse") as any,
+     "/sse-plateformes": MyMCP.mount("/sse-plateformes") as any,
+     "/sse-nouveau": MyMCP.mount("/sse-nouveau") as any,
+   },
+   ```
+3. `npx wrangler deploy`, puis ajouter le nouveau serveur dans Claude Desktop avec l'URL `/sse-nouveau`.
 
 Limite testers : 100 max en mode Testing. Au-delà, faire la vérification Google (ça prend 2-4 semaines).
 

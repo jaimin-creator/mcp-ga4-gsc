@@ -430,9 +430,21 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 	}
 }
 
+/**
+ * Multi-route MCP mounting (Rablab fork).
+ *
+ * Claude Desktop deduplicates MCP servers by their URL. To allow the same
+ * worker to be connected twice (once per Google account, e.g. ppc.rablab@gmail.com
+ * and plateformes@rablab.ca), we expose the same MCP on two distinct paths.
+ *
+ * Each path triggers its own OAuth flow and stores its own tokens.
+ * Add a new entry here if you need a third connected account.
+ */
 export default new OAuthProvider({
-	apiHandler: MyMCP.mount("/sse") as any,
-	apiRoute: "/sse",
+	apiHandlers: {
+		"/sse": MyMCP.mount("/sse") as any,
+		"/sse-plateformes": MyMCP.mount("/sse-plateformes") as any,
+	},
 	authorizeEndpoint: "/authorize",
 	clientRegistrationEndpoint: "/register",
 	defaultHandler: GoogleHandler as any,
