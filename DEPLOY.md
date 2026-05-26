@@ -1,155 +1,180 @@
-# Déploiement worker MCP GA4 + Search Console
+# Deployment guide
 
-État au 18 mai 2026, ce qui est fait et ce qui reste pour que le worker soit live.
+End-to-end guide to deploy this worker on Cloudflare and connect it to Claude Desktop or your Anthropic organization.
 
-## Ce qui est déjà fait (en autonomie)
+## Prerequisites
 
-### Google Cloud (projet `rablab-mcp`)
-- 3 APIs activées : Google Analytics Admin API, Google Analytics Data API, Google Search Console API
-- OAuth Consent Screen configuré en External + Testing (par toi avant)
-- Compte actif : `ppc.rablab@gmail.com` (authuser=1 dans l'URL)
+- A Cloudflare account with Workers and KV enabled.
+- A Google Cloud project where you control the OAuth Consent Screen and OAuth clients.
+- `node` 22+, `npm`, and `git` installed locally.
+- `wrangler` available via `npx` (no global install needed).
 
-### Cloudflare
-- Account ID : `8f873876f6a5c1875b3b12dced29b1af`
-- KV namespace créé : `OAUTH_KV` (id `2efa2ad87fad44b6933a7d62076e0f7e`)
-- Worker à venir : `mcp-ga4-gsc.rablab.workers.dev`
+## 1. Google Cloud setup
 
-### Code worker (dans `/MCP - DataForSEO/ga4-gsc-worker/`)
-- Forké depuis bighadj22/cloudflare-mcp-google-oauth-analytics
-- Remplacé `mcp-analytics` (package dépublié) par `agents/mcp` natif
-- Scope OAuth Google passé de `email profile` à `openid email profile analytics.readonly webmasters.readonly`
-- 8 outils exposés : `ga4_list_account_summaries`, `ga4_get_property_details`, `ga4_run_report`, `ga4_run_realtime_report`, `gsc_list_sites`, `gsc_query_search_analytics`, `gsc_list_sitemaps`, `gsc_inspect_url`
-- Type-check OK, dry-run deploy OK (1.2 MiB, 229 KiB gzip)
-- `wrangler.jsonc` à jour avec le KV ID
+### 1.1 Create the project (or reuse an existing one)
 
-## Ce qui reste (10 minutes manuel)
+Go to https://console.cloud.google.com/projectcreate and create a new project, or pick an existing one.
 
-### 1, Créer le OAuth Client Web Application (Google Cloud)
+### 1.2 Enable the required APIs
 
-L'onglet est déjà ouvert dans Chrome sur la bonne page. Sinon : https://console.cloud.google.com/auth/clients/create?authuser=1&project=rablab-mcp
+In the project, enable :
 
-Remplir le formulaire :
-- Type d'application : `Application Web`
-- Nom : `Rablab GA4 + GSC MCP`
-- URI de redirection autorisé : `https://mcp-ga4-gsc.rablab.workers.dev/callback`
-- (Optionnel pour dev local) ajouter aussi : `http://localhost:8788/callback`
-- Cliquer `Créer`
+- Google Analytics Admin API
+- Google Analytics Data API
+- Google Search Console API
 
-Une popup affiche le `Client ID` et le `Client Secret`. **Copier les deux** quelque part de sécurisé (1Password Rablab par exemple).
+URL : https://console.cloud.google.com/apis/library
 
-### 2, Ajouter les utilisateurs testers
+### 1.3 Configure the OAuth Consent Screen
 
-https://console.cloud.google.com/auth/audience?authuser=1&project=rablab-mcp
+In the project, go to OAuth Consent Screen :
 
-Cliquer `Add users`, ajouter :
-- `julien.c@rablab.ca`
-- `ppc.rablab@gmail.com`
-- Et tous les emails Rablab qui doivent utiliser le worker (max 100)
+- User Type : External (unless your organization is a Google Workspace and you want to restrict).
+- App name : your choice (this is what users see in the Google OAuth dialog).
+- Support email : an admin email.
+- Scopes : you do not need to declare scopes here, they are passed in the OAuth flow.
+- Test users (while in Testing mode) : add every Google account that will use the worker (up to 100). Without this, the OAuth flow returns access_denied.
 
-### 3, Setter les secrets dans Cloudflare et déployer
+### 1.4 Create the OAuth Client
 
-Depuis un terminal local, dans le dossier du worker :
+In the project, go to Credentials → Create credentials → OAuth client ID :
+
+- Application type : Web application
+- Name : your choice
+- Authorized redirect URI : `https://<your-worker>.workers.dev/callback`
+- (Optional, local dev) add `http://localhost:8788/callback`
+
+Click Create. A dialog shows the Client ID and Client Secret. **Save both somewhere secure** (password manager). You will paste them in the next section.
+
+## 2. Cloudflare setup
+
+### 2.1 Create the KV namespace
 
 ```bash
-cd "/Users/rabacademie/Documents/Claude/Projects/MCP - DataForSEO/ga4-gsc-worker"
+npx wrangler kv:namespace create OAUTH_KV
+```
 
-# Login Cloudflare (ouvre une page dans Chrome, valider)
+This prints a namespace ID. Open `wrangler.jsonc` and update the `id` field under `kv_namespaces` with the new ID.
+
+### 2.2 Set the worker name
+
+In `wrangler.jsonc`, change the `name` field to whatever you want your worker to be called. The deployed URL will be `https://<name>.<your-cloudflare-subdomain>.workers.dev`.
+
+## 3. Deploy
+
+### Option A : use the helper script
+
+```bash
+./deploy.sh
+```
+
+The script :
+
+- Logs you into Cloudflare if needed.
+- Prompts you for the Google Client ID and Client Secret.
+- Generates a random `COOKIE_ENCRYPTION_KEY`.
+- Prompts for the optional `ALLOWED_EMAILS`, `ALLOWED_DOMAINS`, and `ALIAS_PATHS` secrets.
+- Deploys the worker.
+
+### Option B : manual
+
+```bash
+# Login if needed
 npx wrangler login
 
-# Setter les 3 secrets
+# Required secrets
 npx wrangler secret put GOOGLE_CLIENT_ID
-# (coller le Client ID puis Enter)
-
 npx wrangler secret put GOOGLE_CLIENT_SECRET
-# (coller le Client Secret puis Enter)
-
 npx wrangler secret put COOKIE_ENCRYPTION_KEY
-# (coller une string aléatoire, par exemple le résultat de : openssl rand -hex 32)
-
-# Optionnel pour restreindre à un domaine Workspace (pas notre cas, on est Gmail) :
+# (use openssl rand -hex 32 to generate a value)
 npx wrangler secret put HOSTED_DOMAIN
-# (coller une string vide, juste Enter)
+# (leave empty unless restricting to a single Google Workspace domain)
 
-# Déployer
+# Optional secrets
+npx wrangler secret put ALLOWED_EMAILS
+# Comma-separated list of authorized emails, e.g. alice@x.com,bob@y.com
+npx wrangler secret put ALLOWED_DOMAINS
+# Comma-separated list of authorized domains, e.g. example.com,other.com
+npx wrangler secret put ALIAS_PATHS
+# Comma-separated list of alias paths for multi-account, e.g. /sse-secondary
+# Leave empty for single-account mode
+
+# Deploy
 npx wrangler deploy
 ```
 
-Le worker sera live à `https://mcp-ga4-gsc.rablab.workers.dev`.
+At least one of `ALLOWED_EMAILS` or `ALLOWED_DOMAINS` must be set. Without these, the worker rejects all sign-ins by design (security gate).
 
-### 4, Tester avec MCP Inspector
+The worker is now live at `https://<your-worker>.workers.dev`.
+
+## 4. Test with MCP Inspector
 
 ```bash
 npx @modelcontextprotocol/inspector
 ```
 
-Ouvrir http://localhost:5173. Connecter à `https://mcp-ga4-gsc.rablab.workers.dev/sse` en mode SSE. Le navigateur va ouvrir un flow OAuth Google : approuver les permissions analytics.readonly + webmasters.readonly. Une fois OK, tester les outils :
+Open the URL shown in the terminal. Set Transport Type to `SSE`, URL to `https://<your-worker>.workers.dev/sse`, click Connect. A Google OAuth flow opens, approve the scopes. Then try `gsc_list_sites` to confirm it works.
 
-- `gsc_list_sites` (no args) doit lister les propriétés Search Console accessibles
-- `ga4_list_account_summaries` (no args) doit lister les comptes GA4
-- `gsc_query_search_analytics` avec `site_url: "https://www.guillevin.com/"`, `start_date: "2026-04-01"`, `end_date: "2026-04-30"`, `dimensions: ["query"]`, `row_limit: 10` doit retourner les top queries Guillevin du mois
+## 5. Connect to Claude Desktop
 
-### 5, Connecter dans Claude Desktop / Cowork
+### Manual config
 
-Le worker expose **deux routes SSE identiques** pour permettre de connecter deux comptes Google distincts (Claude Desktop déduplique par URL, donc une seule route ne suffirait pas) :
-
-- `https://mcp-ga4-gsc.rablab.workers.dev/sse` (route historique, compte `ppc.rablab@gmail.com`)
-- `https://mcp-ga4-gsc.rablab.workers.dev/sse-plateformes` (compte `plateformes@rablab.ca`)
-
-Dans `~/Library/Application Support/Claude/claude_desktop_config.json` (ou via l'UI Claude Desktop) :
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` :
 
 ```json
 {
   "mcpServers": {
-    "ga4-gsc-rablab-ppc": {
+    "ga4-gsc": {
       "command": "npx",
-      "args": ["mcp-remote", "https://mcp-ga4-gsc.rablab.workers.dev/sse"]
-    },
-    "ga4-gsc-rablab-plateformes": {
-      "command": "npx",
-      "args": ["mcp-remote", "https://mcp-ga4-gsc.rablab.workers.dev/sse-plateformes"]
+      "args": ["-y", "mcp-remote", "https://<your-worker>.workers.dev/sse"]
     }
   }
 }
 ```
 
-Restart Claude Desktop. Les deux serveurs apparaissent dans la liste des MCPs. Premier appel sur chaque serveur = OAuth flow (te connecter avec le bon compte Google à chaque fois).
+Restart Claude Desktop. The first time you call a tool, an OAuth flow opens in your browser.
 
-Si tu veux ajouter un 3e compte, voir la section « Ajouter un nouveau compte » plus bas.
+### Helper script
 
-## Diffusion à Rablab
-
-Pour que tous les membres Rablab utilisent le worker, partager l'une des URLs ci-dessus et leur faire ajouter la config Claude Desktop. Chaque utilisateur fait son OAuth flow avec son propre compte Google (donc accès uniquement aux propriétés GA4 et GSC où il a déjà les droits).
-
-**Important** : l'email du compte qui s'authentifie doit être présent dans `ALLOWED_EMAILS` (var Cloudflare) sinon le callback OAuth retourne « Accès refusé ».
-
-## Ajouter un nouveau compte (3e, 4e, etc.)
-
-Trois étapes :
-
-1. Ajouter l'email dans `ALLOWED_EMAILS` (wrangler.jsonc ou via dashboard Cloudflare Workers, section Variables) en séparant par virgules.
-2. Dans `src/index.ts`, ajouter une ligne dans `apiHandlers` avec un nouveau path unique :
-   ```ts
-   apiHandlers: {
-     "/sse": MyMCP.mount("/sse") as any,
-     "/sse-plateformes": MyMCP.mount("/sse-plateformes") as any,
-     "/sse-nouveau": MyMCP.mount("/sse-nouveau") as any,
-   },
-   ```
-3. `npx wrangler deploy`, puis ajouter le nouveau serveur dans Claude Desktop avec l'URL `/sse-nouveau`.
-
-Limite testers : 100 max en mode Testing. Au-delà, faire la vérification Google (ça prend 2-4 semaines).
-
-## En cas de souci
-
-Logs du worker en temps réel :
 ```bash
-npx wrangler tail mcp-ga4-gsc
+WORKER_URL="https://<your-worker>.workers.dev/sse" KEY="ga4-gsc" ./install_in_claude_desktop.sh
 ```
 
-Tester les outils GA4 directement en HTTP :
+The script preserves your existing MCPs.
+
+## 6. Connect at organization level (Anthropic Teams/Enterprise)
+
+If you have an Anthropic organization, add the worker URL as a custom connector at the organization level. Every team member gets access in Cowork, Claude Desktop, and claude.ai web without local config. The allowlist enforces who can actually authenticate.
+
+## 7. Multi-account setup
+
+If you need to connect multiple Google accounts to the same worker, see [`MULTI-ACCOUNT.md`](./MULTI-ACCOUNT.md).
+
+In short : set `ALIAS_PATHS=/sse-secondary` as a secret, redeploy, and add a second connector in Claude with URL `https://<your-worker>.workers.dev/sse-secondary`. Each alias has its own OAuth and tokens.
+
+## 8. Troubleshooting
+
+### `wrangler deploy` fails with `workerd-darwin-arm64 missing`
+
 ```bash
-curl -X POST "https://analyticsdata.googleapis.com/v1beta/properties/PROPERTY_ID:runReport" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"dateRanges":[{"startDate":"30daysAgo","endDate":"yesterday"}],"metrics":[{"name":"sessions"}]}'
+npm install @cloudflare/workerd-darwin-arm64 --legacy-peer-deps
+npx wrangler deploy
+```
+
+### Google OAuth returns 403 access_denied
+
+The Google account is not in the Test users list of the OAuth Consent Screen. Add it at https://console.cloud.google.com/auth/audience
+
+### Worker shows the Access Denied page after Google OAuth
+
+The Google account is not in `ALLOWED_EMAILS` (or its domain not in `ALLOWED_DOMAINS`). Update the secret :
+
+```bash
+npx wrangler secret put ALLOWED_EMAILS
+```
+
+### Live logs
+
+```bash
+npx wrangler tail <your-worker-name> --format pretty
 ```

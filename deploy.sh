@@ -1,83 +1,111 @@
 #!/usr/bin/env bash
-# Déploiement automatique du worker mcp-ga4-gsc.rablab.workers.dev
-# Tout est prerempli sauf le Client Secret Google qui doit être copié depuis :
-# https://console.cloud.google.com/auth/clients/542032490673-tc2s4rd1jjjlqk1hcis0dgoljssk8eun.apps.googleusercontent.com?authuser=1&project=rablab-mcp
-# (clique sur Add secret si le secret n'est plus visible, puis copie le code)
+# Worker deployment helper for the GA4 + Search Console MCP.
+# Prompts for the Google OAuth Client ID and Client Secret, then sets all
+# the secrets and deploys via wrangler.
+#
+# Prerequisites :
+#   1. A Google Cloud project with the Analytics Admin, Analytics Data and
+#      Search Console APIs enabled.
+#   2. A Google OAuth 2.0 Web Application client created in that project,
+#      with redirect URI https://<your-worker>.workers.dev/callback
+#   3. A Cloudflare account with a deployed worker (run npx wrangler deploy
+#      once before this script, or let this script trigger the first deploy).
+#
+# See DEPLOY.md for the full step-by-step.
 
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
-GOOGLE_CLIENT_ID="542032490673-tc2s4rd1jjjlqk1hcis0dgoljssk8eun.apps.googleusercontent.com"
 COOKIE_ENCRYPTION_KEY="$(openssl rand -hex 32)"
 
 echo ""
-echo "=== Worker mcp-ga4-gsc, déploiement Cloudflare ==="
-echo ""
-echo "Client ID Google : $GOOGLE_CLIENT_ID"
-echo "Cookie Encryption Key : générée automatiquement (32 bytes hex)"
+echo "=== Worker deployment to Cloudflare ==="
 echo ""
 
-# Etape 1, wrangler login (ouvre Chrome, accepter)
+# Step 1, wrangler login (opens browser)
 if ! npx wrangler whoami >/dev/null 2>&1; then
-  echo "→ Connexion Cloudflare requise. Une page va s'ouvrir dans le browser."
+  echo "Cloudflare login required. A browser tab will open."
   npx wrangler login
 fi
-echo "✓ Cloudflare auth OK"
+echo "Cloudflare auth OK"
 echo ""
 
-# Etape 2, secrets non sensibles
-echo "→ Set GOOGLE_CLIENT_ID..."
+# Step 2, prompt for Google OAuth Client ID
+echo "Enter your Google OAuth Client ID :"
+read -r GOOGLE_CLIENT_ID
+if [ -z "$GOOGLE_CLIENT_ID" ]; then
+  echo "Client ID is required, aborting."
+  exit 1
+fi
+echo ""
+
+echo "Setting GOOGLE_CLIENT_ID..."
 echo "$GOOGLE_CLIENT_ID" | npx wrangler secret put GOOGLE_CLIENT_ID
 echo ""
 
-echo "→ Set COOKIE_ENCRYPTION_KEY..."
+echo "Setting COOKIE_ENCRYPTION_KEY (random 32 bytes hex)..."
 echo "$COOKIE_ENCRYPTION_KEY" | npx wrangler secret put COOKIE_ENCRYPTION_KEY
 echo ""
 
-echo "→ Set HOSTED_DOMAIN (vide, on accepte tous les comptes Google) ..."
+echo "Setting HOSTED_DOMAIN (empty, accept any Google account)..."
 echo "" | npx wrangler secret put HOSTED_DOMAIN
 echo ""
 
-# Etape 3, secret sensible, prompt
+# Step 3, prompt for Google OAuth Client Secret
 echo "──────────────────────────────────────────────────────────────"
-echo " Étape manuelle : copier le Client Secret Google"
+echo " Now paste your Google OAuth Client Secret"
 echo "──────────────────────────────────────────────────────────────"
-echo " 1. Ouvre :"
-echo "    https://console.cloud.google.com/auth/clients/542032490673-tc2s4rd1jjjlqk1hcis0dgoljssk8eun.apps.googleusercontent.com?authuser=1&project=rablab-mcp"
-echo " 2. Si tu vois encore le code secret affiché : copie-le."
-echo " 3. Sinon clique 'Add secret', le nouveau code apparait, copie-le."
-echo " 4. Colle le code ci-dessous au prompt wrangler."
+echo " Find it at :"
+echo "   https://console.cloud.google.com/auth/clients"
+echo " Pick your OAuth client and copy the secret."
 echo "──────────────────────────────────────────────────────────────"
 echo ""
 npx wrangler secret put GOOGLE_CLIENT_SECRET
 
 echo ""
-echo "✓ Tous les secrets sont en place"
+echo "Optional secrets (skip with empty value if not needed) :"
 echo ""
 
-# Etape 4, deploy
-echo "→ Déploiement..."
+echo "Setting ALLOWED_EMAILS (comma-separated, e.g. alice@x.com,bob@y.com)..."
+npx wrangler secret put ALLOWED_EMAILS
+echo ""
+
+echo "Setting ALLOWED_DOMAINS (comma-separated, e.g. example.com)..."
+npx wrangler secret put ALLOWED_DOMAINS
+echo ""
+
+echo "Setting ALIAS_PATHS for multi-account (comma-separated, e.g. /sse-secondary)..."
+echo "Leave empty for single-account mode (vanilla)."
+npx wrangler secret put ALIAS_PATHS
+echo ""
+
+echo "All secrets in place"
+echo ""
+
+# Step 4, deploy
+echo "Deploying..."
 npx wrangler deploy
 
 echo ""
 echo "══════════════════════════════════════════════════════════════"
-echo " Worker déployé : https://mcp-ga4-gsc.rablab.workers.dev"
-echo " Endpoint MCP SSE : https://mcp-ga4-gsc.rablab.workers.dev/sse"
+echo " Worker deployed"
+echo " MCP SSE endpoint : https://<your-worker>.workers.dev/sse"
 echo "══════════════════════════════════════════════════════════════"
 echo ""
-echo "Pour tester avec MCP Inspector :"
+echo "To test with MCP Inspector :"
 echo "  npx @modelcontextprotocol/inspector"
-echo "Puis colle https://mcp-ga4-gsc.rablab.workers.dev/sse dans Inspector"
-echo "et lance ga4_list_account_summaries ou gsc_list_sites."
+echo "Then paste your worker URL with /sse into Inspector"
+echo "and call ga4_list_account_summaries or gsc_list_sites."
 echo ""
-echo "Pour ajouter dans Claude Desktop, édite claude_desktop_config.json :"
+echo "To add in Claude Desktop, see install_in_claude_desktop.sh"
+echo "or edit claude_desktop_config.json :"
 cat <<'JSON'
 {
   "mcpServers": {
-    "ga4-gsc-rablab": {
+    "ga4-gsc": {
       "command": "npx",
-      "args": ["mcp-remote", "https://mcp-ga4-gsc.rablab.workers.dev/sse"]
+      "args": ["mcp-remote", "https://<your-worker>.workers.dev/sse"]
     }
   }
 }

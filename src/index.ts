@@ -13,7 +13,7 @@ function asTextResult(payload: unknown) {
 
 export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 	server = new McpServer({
-		name: "Rablab GA4 + Search Console MCP",
+		name: "GA4 + Search Console MCP",
 		version: "1.0.0",
 	});
 
@@ -431,29 +431,42 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 }
 
 /**
- * Multi-route MCP mounting (Rablab fork).
+ * Multi-route MCP mounting.
  *
  * Claude Desktop deduplicates MCP servers by their URL. To allow the same
- * worker to be connected twice (once per Google account, e.g. ppc.rablab@gmail.com
- * and plateformes@rablab.ca), we expose the same MCP on two distinct paths.
+ * worker to be connected twice (once per Google account), the worker can
+ * expose the same MCP on multiple distinct paths.
+ *
+ * Alias paths are read from the env variable ALIAS_PATHS (comma-separated
+ * list of paths starting with /sse-). Example: ALIAS_PATHS="/sse-secondary".
+ * Default behaviour (no env var) is single-account, identical to vanilla MCP.
  *
  * Each path triggers its own OAuth flow on the Claude side (separate MCP
  * tokens, separate Google refresh tokens) but routes internally to the same
  * /sse handler. We cannot call MyMCP.mount() twice on different paths because
  * agents@0.0.95 hardcodes "/sse" in the internal upgrade URL and the DO id
  * namespace prefix, so multi-mount would collide. The wrapper below rewrites
- * the request path to /sse before forwarding to the real handler.
+ * any alias request to /sse before forwarding to the real handler.
  *
- * Add a new alias path here if you need a third connected account.
+ * The apiRoute is set to "/sse" (prefix match), which automatically covers
+ * all alias paths that start with /sse-something thanks to startsWith().
+ *
+ * See MULTI-ACCOUNT.md for usage examples.
  */
-const ALIAS_PATHS = ["/sse-plateformes"];
+function parseAliasPaths(envValue: string | undefined): string[] {
+	return (envValue || "")
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
+}
 
 const mcpHandler = MyMCP.mount("/sse") as any;
 
 const apiHandler = {
-	async fetch(request: Request, env: any, ctx: ExecutionContext) {
+	async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+		const aliasPaths = parseAliasPaths(env.ALIAS_PATHS);
 		const url = new URL(request.url);
-		for (const alias of ALIAS_PATHS) {
+		for (const alias of aliasPaths) {
 			if (url.pathname === alias || url.pathname.startsWith(`${alias}/`)) {
 				const rewrittenUrl = new URL(request.url);
 				rewrittenUrl.pathname = url.pathname.replace(alias, "/sse");
@@ -467,7 +480,7 @@ const apiHandler = {
 
 export default new OAuthProvider({
 	apiHandler: apiHandler as any,
-	apiRoute: ["/sse", ...ALIAS_PATHS],
+	apiRoute: "/sse",
 	authorizeEndpoint: "/authorize",
 	clientRegistrationEndpoint: "/register",
 	defaultHandler: GoogleHandler as any,

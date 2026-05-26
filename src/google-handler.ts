@@ -10,7 +10,7 @@ import {
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>();
 
 /* -------------------------------------------------------------------------- */
-/* Allowlist helpers (Rablab fork)                                            */
+/* Allowlist helpers                                                          */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -70,7 +70,7 @@ function renderDeniedPage(email: string): string {
   <div class="card">
     <h1>Acces refuse</h1>
     <p>Le compte <code>${escapeHtml(email)}</code> n'est pas autorise a utiliser ce serveur MCP.</p>
-    <p>Contacte l'administrateur de Rablab si tu penses que c'est une erreur.</p>
+    <p>Contacte l'administrateur si tu penses que c'est une erreur.</p>
   </div>
 </body>
 </html>`;
@@ -97,8 +97,8 @@ app.get("/authorize", async (c) => {
 		client: await c.env.OAUTH_PROVIDER.lookupClient(clientId),
 		server: {
 			description:
-				"Rablab MCP server for Google Analytics 4 and Search Console. Requires read-only access to the GA4 and GSC properties of your account.",
-			name: "Rablab GA4 + Search Console MCP",
+				"MCP server for Google Analytics 4 and Search Console. Requires read-only access to the GA4 and GSC properties of your account.",
+			name: "GA4 + Search Console MCP",
 		},
 		state: { oauthReqInfo },
 	});
@@ -141,7 +141,7 @@ async function redirectToGoogle(
  * Google redirects here after user authentication.
  * 1. Exchange the temporary code for tokens.
  * 2. Fetch the user's email from Google.
- * 3. Check the email against ALLOWED_EMAILS / ALLOWED_DOMAINS (Rablab fork).
+ * 3. Check the email against ALLOWED_EMAILS / ALLOWED_DOMAINS.
  * 4. If allowed, complete the MCP OAuth flow back to the MCP client.
  */
 app.get("/callback", async (c) => {
@@ -188,7 +188,7 @@ app.get("/callback", async (c) => {
 		verified_email?: boolean;
 	};
 
-	/* ----- Rablab fork: allowlist gate ------------------------------------ */
+	/* ----- Allowlist gate ------------------------------------------------- */
 	if (verified_email === false) {
 		return c.html(renderDeniedPage(email + " (non verifie)"), 403);
 	}

@@ -155,7 +155,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 Restart Claude Desktop. The first time you call a tool, an OAuth flow opens in your browser.
 
-**Multiple Google accounts on the same machine.** Claude Desktop deduplicates MCP servers by URL, so you cannot add the same `/sse` endpoint twice. The worker exposes additional SSE routes (e.g. `/sse-plateformes`) so you can connect a second Google account in parallel. Add new routes in `src/index.ts` (inside `apiHandlers`) and add the new email to `ALLOWED_EMAILS`. See `DEPLOY.md` for the Rablab-specific runbook.
+**Multiple Google accounts on the same machine.** Claude Desktop deduplicates MCP servers by URL, so you cannot add the same `/sse` endpoint twice. The worker supports multi-account via the `ALIAS_PATHS` array in `src/index.ts`: each alias is a separate URL that Claude treats as a distinct connector (e.g. `/sse-secondary`). By default `ALIAS_PATHS = []` so the worker behaves like a normal single-account MCP. See [`MULTI-ACCOUNT.md`](./MULTI-ACCOUNT.md) for step-by-step scenarios (add, remove, fork, troubleshoot).
 
 ### 7. Connect at organization level (recommended)
 

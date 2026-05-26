@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# Ajoute le MCP GA4 + Search Console à Claude Desktop sans écraser les autres MCPs déjà configurés.
+# Adds the GA4 + Search Console MCP to Claude Desktop without overwriting
+# other MCPs already configured. Edit WORKER_URL and KEY below to match your
+# deployed worker.
 set -euo pipefail
 
 CONFIG_DIR="$HOME/Library/Application Support/Claude"
 CONFIG_FILE="$CONFIG_DIR/claude_desktop_config.json"
-WORKER_URL="https://mcp-ga4-gsc.rablab.workers.dev/sse"
-KEY="ga4-gsc-rablab"
+
+# Override these two values for your deployment.
+WORKER_URL="${WORKER_URL:-https://<your-worker>.workers.dev/sse}"
+KEY="${KEY:-ga4-gsc}"
 
 mkdir -p "$CONFIG_DIR"
 
@@ -33,7 +37,7 @@ Object.keys(cfg.mcpServers).forEach(k => console.log("  - " + k));
 NODE
 
 echo ""
-echo "✓ MCP ga4-gsc-rablab ajouté à Claude Desktop"
+echo "MCP $KEY added to Claude Desktop"
 echo ""
-echo "Redémarre Claude Desktop (Cmd+Q puis relance) pour que le MCP soit chargé."
-echo "Au premier appel, un browser s'ouvre pour le flow OAuth — connecte-toi avec ppc.rablab@gmail.com."
+echo "Restart Claude Desktop (Cmd+Q then relaunch) so the MCP is loaded."
+echo "On the first tool call, a browser opens for the OAuth flow."
