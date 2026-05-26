@@ -486,22 +486,28 @@ function parsePathEmailMap(envValue: string | undefined): Record<string, string[
 
 /**
  * Check whether an email is authorized to use a given request path.
- * Returns true if no PATH_EMAIL_MAP entry covers this path (no restriction).
- * Returns false if the path is restricted and the email is not in the list.
- * Matches longest path prefix first to handle overlapping prefixes like
- * /sse and /sse-secondary correctly.
+ *
+ * IMPORTANT: only the EXACT base path (the connector entry point) is checked,
+ * not sub-paths. Once a session is established via /sse-foo, the MCP client
+ * posts subsequent messages to /sse/message?sessionId=XXX (the agents lib
+ * always emits /sse as the endpoint base regardless of the alias used to
+ * open the stream). Checking those sub-paths against the map would reject
+ * legitimate messages because /sse/message would be matched against the /sse
+ * map entry, not the /sse-foo entry.
+ *
+ * The base path check at session open time is the security boundary. After
+ * that, the session is identified by the opaque sessionId issued by the DO.
+ *
+ * Returns true if no PATH_EMAIL_MAP entry covers this exact path (no
+ * restriction). Returns false if the path is restricted and the email is
+ * not in the list.
  */
 function isAllowedForPath(
 	requestPath: string,
 	email: string | undefined,
 	map: Record<string, string[]>,
 ): boolean {
-	const sortedPaths = Object.keys(map).sort((a, b) => b.length - a.length);
-	const matchedPath = sortedPaths.find(
-		(p) => requestPath === p || requestPath.startsWith(`${p}/`),
-	);
-	if (!matchedPath) return true;
-	const allowedEmails = map[matchedPath];
+	const allowedEmails = map[requestPath];
 	if (!Array.isArray(allowedEmails) || allowedEmails.length === 0) return true;
 	const normalized = email?.trim().toLowerCase();
 	if (!normalized) return false;
