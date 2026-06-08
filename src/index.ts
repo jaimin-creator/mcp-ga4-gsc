@@ -559,4 +559,9 @@ export default new OAuthProvider({
 	clientRegistrationEndpoint: "/register",
 	defaultHandler: GoogleHandler as any,
 	tokenEndpoint: "/token",
+	// Default is 3600s (1 hour), which causes frequent disconnections on
+	// long-lived SSE connections. 30 days keeps connectors stable across
+	// laptop sleep, Wi-Fi switches, and idle periods. The underlying Google
+	// refresh_token is independent and stays valid until explicitly revoked.
+	accessTokenTTL: 60 * 60 * 24 * 30,
 });
