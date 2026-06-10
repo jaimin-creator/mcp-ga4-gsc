@@ -516,6 +516,55 @@ function isAllowedForPath(
 
 const mcpHandler = MyMCP.mount("/sse") as any;
 
+/**
+ * When we rewrite an incoming /sse-alias request into /sse internally, the
+ * MCP handler emits a SSE event containing the endpoint URL the client should
+ * POST messages to. This endpoint is hardcoded to /sse/message in the agents
+ * lib. We need to rewrite it back to /sse-alias/message in the outgoing SSE
+ * stream so the client stays coherent on the alias path it opened.
+ *
+ * Without this rewrite, Claude Desktop ends up with a state mismatch (opened
+ * /sse-alias but told to POST to /sse/message) that causes the tools list
+ * to require manual refreshes after each disconnection.
+ */
+function rewriteSseEndpointInStream(response: Response, alias: string): Response {
+	if (!response.body) return response;
+	const contentType = response.headers.get("Content-Type") || "";
+	if (!contentType.includes("text/event-stream")) return response;
+
+	const reader = response.body.getReader();
+	const decoder = new TextDecoder();
+	const encoder = new TextEncoder();
+	const { readable, writable } = new TransformStream();
+	const writer = writable.getWriter();
+
+	(async () => {
+		try {
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				const text = decoder.decode(value, { stream: true });
+				const rewritten = text.replaceAll("/sse/message", `${alias}/message`);
+				await writer.write(encoder.encode(rewritten));
+			}
+		} catch (e) {
+			console.error("SSE stream rewrite error:", e);
+		} finally {
+			try {
+				await writer.close();
+			} catch {
+				// ignore
+			}
+		}
+	})();
+
+	return new Response(readable, {
+		status: response.status,
+		statusText: response.statusText,
+		headers: response.headers,
+	});
+}
+
 const apiHandler = {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext) {
 		const url = new URL(request.url);
@@ -545,7 +594,8 @@ const apiHandler = {
 				const rewrittenUrl = new URL(request.url);
 				rewrittenUrl.pathname = url.pathname.replace(alias, "/sse");
 				const rewrittenRequest = new Request(rewrittenUrl, request);
-				return mcpHandler.fetch(rewrittenRequest, env, ctx);
+				const response = await mcpHandler.fetch(rewrittenRequest, env, ctx);
+				return rewriteSseEndpointInStream(response, alias);
 			}
 		}
 		return mcpHandler.fetch(request, env, ctx);
