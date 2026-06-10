@@ -517,48 +517,101 @@ function isAllowedForPath(
 const mcpHandler = MyMCP.mount("/sse") as any;
 
 /**
- * When we rewrite an incoming /sse-alias request into /sse internally, the
- * MCP handler emits a SSE event containing the endpoint URL the client should
- * POST messages to. This endpoint is hardcoded to /sse/message in the agents
- * lib. We need to rewrite it back to /sse-alias/message in the outgoing SSE
- * stream so the client stays coherent on the alias path it opened.
+ * Wraps an outgoing SSE response with two behaviors:
  *
- * Without this rewrite, Claude Desktop ends up with a state mismatch (opened
- * /sse-alias but told to POST to /sse/message) that causes the tools list
- * to require manual refreshes after each disconnection.
+ * 1. Rewrite the endpoint URL emitted by the agents lib (hardcoded to
+ *    /sse/message) to use the alias path the client actually opened
+ *    (/sse-alias/message). Without this rewrite, Claude ends up with a
+ *    state mismatch causing the tools list to require manual refreshes.
+ *
+ * 2. Inject a SSE keep-alive comment every 25s so the connection never goes
+ *    idle long enough to hibernate the Durable Object or trigger client-side
+ *    cleanup. This is what makes alias paths behave like /sse (always live).
+ *
+ * Implementation uses a ReadableStream that merges the upstream chunks with
+ * periodic keep-alive comments. A small text buffer guards against splitting
+ * a /sse/message URL across two network chunks (rare but observable on
+ * slower connections like Claude in Chrome).
  */
 function rewriteSseEndpointInStream(response: Response, alias: string): Response {
 	if (!response.body) return response;
 	const contentType = response.headers.get("Content-Type") || "";
 	if (!contentType.includes("text/event-stream")) return response;
 
-	const reader = response.body.getReader();
 	const decoder = new TextDecoder();
 	const encoder = new TextEncoder();
-	const { readable, writable } = new TransformStream();
-	const writer = writable.getWriter();
+	const replacement = `${alias}/message`;
+	const keepAliveInterval = 25_000; // 25 seconds
+	const keepAlivePayload = encoder.encode(": keepalive\n\n");
+	const upstreamReader = response.body.getReader();
+	let buffer = "";
 
-	(async () => {
-		try {
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-				const text = decoder.decode(value, { stream: true });
-				const rewritten = text.replaceAll("/sse/message", `${alias}/message`);
-				await writer.write(encoder.encode(rewritten));
-			}
-		} catch (e) {
-			console.error("SSE stream rewrite error:", e);
-		} finally {
+	const merged = new ReadableStream<Uint8Array>({
+		start(controller) {
+			let closed = false;
+			let pingTimer: ReturnType<typeof setInterval> | null = null;
+
+			const safeClose = () => {
+				if (closed) return;
+				closed = true;
+				if (pingTimer) {
+					clearInterval(pingTimer);
+					pingTimer = null;
+				}
+				try {
+					controller.close();
+				} catch {
+					// already closed
+				}
+			};
+
+			pingTimer = setInterval(() => {
+				if (closed) return;
+				try {
+					controller.enqueue(keepAlivePayload);
+				} catch {
+					safeClose();
+				}
+			}, keepAliveInterval);
+
+			(async () => {
+				try {
+					while (true) {
+						const { done, value } = await upstreamReader.read();
+						if (done) break;
+						buffer += decoder.decode(value, { stream: true });
+						const lastNewline = buffer.lastIndexOf("\n");
+						if (lastNewline === -1) continue;
+						const emitText = buffer.slice(0, lastNewline + 1);
+						buffer = buffer.slice(lastNewline + 1);
+						const rewritten = emitText.replaceAll("/sse/message", replacement);
+						if (!closed) {
+							controller.enqueue(encoder.encode(rewritten));
+						}
+					}
+					buffer += decoder.decode();
+					if (buffer.length > 0 && !closed) {
+						const rewritten = buffer.replaceAll("/sse/message", replacement);
+						controller.enqueue(encoder.encode(rewritten));
+						buffer = "";
+					}
+				} catch (e) {
+					console.error("SSE stream rewrite error:", e);
+				} finally {
+					safeClose();
+				}
+			})();
+		},
+		cancel() {
 			try {
-				await writer.close();
+				upstreamReader.cancel();
 			} catch {
 				// ignore
 			}
-		}
-	})();
+		},
+	});
 
-	return new Response(readable, {
+	return new Response(merged, {
 		status: response.status,
 		statusText: response.statusText,
 		headers: response.headers,
